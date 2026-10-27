@@ -33,6 +33,8 @@ build_linux() {
     -e GO_VERSION="$GO_VERSION" -e GOPROXY="$GOPROXY" -e LDFLAGS="$LDFLAGS" -e GOARCH_TARGET="$go_arch" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     "$image" bash -euo pipefail -c '
+      # The checkout belongs to the runner user; Go reads its Git metadata as container root.
+      git config --global --add safe.directory /src
       curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH_TARGET}.tar.gz" -o /tmp/go.tgz
       tar -C /usr/local -xzf /tmp/go.tgz
       export PATH="/usr/local/go/bin:$PATH" GOFLAGS=-mod=readonly GOTOOLCHAIN=local
