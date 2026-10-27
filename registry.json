@@ -4,7 +4,7 @@
     {
       "id": "keeper-usage-push",
       "name": "Keeper Usage Push",
-      "description": "Durably buffers CPA usage and uploads it to a central Keeper over HTTPS. Set the upload URL and token from Keeper's Push receiving page in this plugin's settings. / 将 CPA 用量可靠缓存在本地，并通过 HTTPS 推送到中心 Keeper；在插件设置中填写 Keeper「推送接收」页面提供的上传地址和 token 即可。",
+      "description": "Durably buffers CPA usage and uploads it to a central Keeper over HTTP or HTTPS. Set the upload URL and token from Keeper's Push receiving page in this plugin's settings. / 将 CPA 用量可靠缓存在本地，并通过 HTTP 或 HTTPS 推送到中心 Keeper；在插件设置中填写 Keeper「推送接收」页面提供的上传地址和 token 即可。",
       "author": "brooke1220",
       "repository": "https://github.com/brooke1220/keeper-usage-push",
       "homepage": "https://github.com/brooke1220/keeper-usage-push",

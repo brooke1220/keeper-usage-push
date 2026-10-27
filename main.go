@@ -68,7 +68,7 @@ var Version = "0.0.0-dev"
 // configFields lets CPA's plugin page render the settings form. Only endpoint and token are
 // needed to start uploading; both come from the push receiving card in Keeper's settings page.
 var configFields = []pluginapi.ConfigField{
-	{Name: "endpoint", Type: pluginapi.ConfigFieldTypeString, Description: "Required to upload. Upload URL shown in Keeper Settings > Push receiving, e.g. https://keeper.example.com/api/v1/ingest/usage. Uploading starts once endpoint and token are saved."},
+	{Name: "endpoint", Type: pluginapi.ConfigFieldTypeString, Description: "Required to upload. Upload URL shown in Keeper Settings > Push receiving, e.g. https://keeper.example.com/api/v1/ingest/usage. HTTP and HTTPS are supported without extra settings. HTTP sends the token and usage without encryption."},
 	{Name: "token", Type: pluginapi.ConfigFieldTypeString, Description: "Required to upload. Token created for this CPA in Keeper Settings > Push receiving. Use token_file instead to read it from a mounted secret."},
 	{Name: "token_file", Type: pluginapi.ConfigFieldTypeString, Description: "Optional. File containing the token; set either token or token_file."},
 	{Name: "spool_dir", Type: pluginapi.ConfigFieldTypeString, Default: push.DefaultSpoolDir, Description: "Optional. Persistent local queue directory, relative to the CPA working directory. Defaults to the plugins directory, which the official Docker setup already persists."},

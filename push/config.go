@@ -2,7 +2,6 @@ package push
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,14 +17,13 @@ const DefaultSpoolDir = "plugins/keeper-usage-push-spool"
 // Config needs only endpoint and token. Keeper creates the token in its settings page and
 // derives the CPA source from it, so pending records keep their identity across rotation.
 type Config struct {
-	Endpoint          string        `yaml:"endpoint"`
-	Token             string        `yaml:"token"`
-	TokenFile         string        `yaml:"token_file"`
-	SpoolDir          string        `yaml:"spool_dir"`
-	MaxSpoolBytes     int64         `yaml:"max_spool_bytes"`
-	FlushInterval     time.Duration `yaml:"flush_interval"`
-	RequestTimeout    time.Duration `yaml:"request_timeout"`
-	AllowHTTPLoopback bool          `yaml:"allow_http_loopback"`
+	Endpoint       string        `yaml:"endpoint"`
+	Token          string        `yaml:"token"`
+	TokenFile      string        `yaml:"token_file"`
+	SpoolDir       string        `yaml:"spool_dir"`
+	MaxSpoolBytes  int64         `yaml:"max_spool_bytes"`
+	FlushInterval  time.Duration `yaml:"flush_interval"`
+	RequestTimeout time.Duration `yaml:"request_timeout"`
 }
 
 // identifier matches Keeper's error codes in rejection bodies.
@@ -41,11 +39,10 @@ func (c Config) Unconfigured() bool {
 func (c Config) normalized() (Config, error) {
 	u, err := url.Parse(c.Endpoint)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return c, fmt.Errorf("endpoint must be an HTTPS URL without credentials, query or fragment")
+		return c, fmt.Errorf("endpoint must be an HTTP or HTTPS URL without credentials, query or fragment")
 	}
-	loopback := net.ParseIP(u.Hostname())
-	if u.Scheme != "https" && !(c.AllowHTTPLoopback && u.Scheme == "http" && loopback != nil && loopback.IsLoopback()) {
-		return c, fmt.Errorf("endpoint must use HTTPS (explicit HTTP loopback is for local testing only)")
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return c, fmt.Errorf("endpoint must use HTTP or HTTPS")
 	}
 	if c.TokenFile != "" {
 		if c.Token != "" {

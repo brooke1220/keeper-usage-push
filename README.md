@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A native [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) plugin that durably buffers usage and uploads it to a central [Keeper](https://github.com/brooke1220/cpa-usage-keeper) over HTTPS. It only observes usage; model requests never wait for network delivery.
+A native [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) plugin that durably buffers usage and uploads it to a central [Keeper](https://github.com/brooke1220/cpa-usage-keeper) over HTTP or HTTPS. It only observes usage; model requests never wait for network delivery.
 
 The plugin runs on unmodified official CPA v8 releases. It is built against the official `github.com/router-for-me/CLIProxyAPI/v8` module and registers plugin schema 6, which every v8 host accepts. Verified end to end against v8.0.44.
 
@@ -109,7 +109,7 @@ plugins:
       token: paste-the-token-from-keeper
 ```
 
-Optional fields: `token_file` (read the token from a mounted secret instead of `token`; never set both), `spool_dir`, `max_spool_bytes` (default 1 GiB), `flush_interval` (5s) and `request_timeout` (15s). A token must contain at least 32 characters without whitespace. HTTPS certificates are verified. HTTP is only supported for literal loopback addresses when `allow_http_loopback: true` is explicitly set for local testing. Redirects are not followed.
+Optional fields: `token_file` (read the token from a mounted secret instead of `token`; never set both), `spool_dir`, `max_spool_bytes` (default 1 GiB), `flush_interval` (5s) and `request_timeout` (15s). A token must contain at least 32 characters without whitespace. Both HTTP and HTTPS endpoints, including IP addresses and domain names, work without any extra setting. HTTPS certificates are verified. HTTP sends the push token and usage, including full client API Keys, without encryption. Redirects are not followed.
 
 An accepted configuration keeps the resolved token in memory, so a rejected edit or upgrade rollback can restore it even if `token_file` has become unavailable. The snapshot is not written to disk. A successful configuration reload reads the file again; a CPA restart also requires the configured token file to be readable.
 
@@ -130,7 +130,7 @@ The spool is bound to its exact endpoint; change `spool_dir` together with `endp
 - Records still waiting in CPA memory can be lost on abrupt termination, and on official hosts also during a normal restart, because they unload plugins before stopping usage dispatch. The plugin never waits for remote delivery at shutdown. Permanent disk loss and coordinated restoration of old central backups are outside the delivery guarantee.
 - Logs go to CPA's logger through the host log callback. Idle queue status is logged at debug level; new quarantines are logged as warnings, and drops as rate-limited errors. Upload errors keep their transport cause (DNS, TLS, refused connection) and never contain the push token.
 
-The payload whitelists statistical fields. It excludes prompts, responses, failure bodies, upstream tokens and arbitrary headers. Full client Keys are intentionally transmitted over HTTPS so Keeper can retain its existing Key grouping and masked display behavior. Fees are calculated centrally.
+The payload whitelists statistical fields. It excludes prompts, responses, failure bodies, upstream tokens and arbitrary headers. Full client Keys are intentionally included so Keeper can retain its existing Key grouping and masked display behavior. HTTPS encrypts these uploads; HTTP sends them without encryption. Fees are calculated centrally.
 
 ## Inspect local quarantine
 

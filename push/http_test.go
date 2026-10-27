@@ -14,6 +14,41 @@ import (
 	"testing"
 )
 
+func TestHTTPUploadWithoutExtraSettings(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/ingest/usage" || r.TLS != nil {
+			t.Errorf("unexpected HTTP upload: %s %s TLS=%v", r.Method, r.URL.Path, r.TLS != nil)
+		}
+		if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("t", 32) {
+			t.Error("HTTP upload did not authenticate")
+		}
+		var batch Batch
+		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if batch.SchemaVersion != SchemaVersion || len(batch.Events) != 1 {
+			t.Errorf("unexpected HTTP batch: version=%d events=%d", batch.SchemaVersion, len(batch.Events))
+		}
+		ack(w, batch)
+	}))
+	defer server.Close()
+	q := openQueue(t, configFor(t, server.URL+"/api/v1/ingest/usage"))
+	if err := q.Enqueue(record(t)); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := q.Flush(context.Background()); err != nil || count != 1 {
+		t.Fatalf("HTTP upload failed: count=%d error=%v", count, err)
+	}
+	stats, err := q.Stats()
+	if err != nil || stats.Pending != 0 || stats.Bytes != 0 || stats.LastSuccess == "" || calls.Load() != 1 {
+		t.Fatalf("HTTP upload was not acknowledged: stats=%+v calls=%d error=%v", stats, calls.Load(), err)
+	}
+}
+
 func TestAuthenticationFailureKeepsDurableRecord(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
 	defer server.Close()

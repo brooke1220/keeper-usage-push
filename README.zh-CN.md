@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-这是一个原生 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（简称 CPA）插件，用于将用量记录持久化到本地队列，再通过 HTTPS 上传到统一的 [Keeper](https://github.com/brooke1220/cpa-usage-keeper) 服务。插件只负责采集用量，模型请求无需等待用量数据上传。
+这是一个原生 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（简称 CPA）插件，用于将用量记录持久化到本地队列，再通过 HTTP 或 HTTPS 上传到统一的 [Keeper](https://github.com/brooke1220/cpa-usage-keeper) 服务。插件只负责采集用量，模型请求无需等待用量数据上传。
 
 插件可直接运行在未经修改的官方 CPA v8 发行版上。它依赖官方 `github.com/router-for-me/CLIProxyAPI/v8` 模块，注册的插件 schema 版本为 6，所有 v8 宿主均可接受。已基于 v8.0.44 完成端到端验证。
 
@@ -120,7 +120,7 @@ plugins:
       token: paste-the-token-from-keeper
 ```
 
-可选配置项包括：`token_file`（从挂载的密钥文件中读取令牌，用于替代 `token`，两者不能同时设置）、`spool_dir`、`max_spool_bytes`（默认 1 GiB）、`flush_interval`（默认 `5s`）和 `request_timeout`（默认 `15s`）。令牌至少需要 32 个字符，且不能包含空白字符。插件会验证 HTTPS 证书。仅在本地测试时，显式设置 `allow_http_loopback: true` 后，才允许使用以回环 IP 字面量为主机的 HTTP 地址。插件不会跟随重定向。
+可选配置项包括：`token_file`（从挂载的密钥文件中读取令牌，用于替代 `token`，两者不能同时设置）、`spool_dir`、`max_spool_bytes`（默认 1 GiB）、`flush_interval`（默认 `5s`）和 `request_timeout`（默认 `15s`）。令牌至少需要 32 个字符，且不能包含空白字符。HTTP 和 HTTPS 地址均直接支持，包括 IP 地址和域名，无需额外开关。插件会验证 HTTPS 证书。HTTP 会明文传输推送令牌和用量数据，包括完整的客户端 API Key。插件不会跟随重定向。
 
 插件接受配置后，会将读取到的令牌保存在内存中，即使之后 `token_file` 无法读取，也能在拒绝配置修改或升级回滚时恢复原来的令牌。该配置快照不会写入磁盘。成功重新加载配置时会再次读取文件；CPA 重启时也要求配置的令牌文件可读。
 
@@ -141,7 +141,7 @@ plugins:
 - 异常终止可能导致仍在 CPA 内存中等待处理的记录丢失；官方宿主在正常重启时也可能丢失这些记录，因为它们会先卸载插件，再停止用量分发。插件关闭时不会等待远端投递完成。永久性磁盘丢失，以及中央备份回退后与本地状态的协调恢复，不在投递保证范围内。
 - 日志通过宿主日志回调写入 CPA 日志。队列空闲状态使用 debug 级别，新增隔离记录使用 warning 级别，丢弃记录使用限频的 error 日志。上传错误会保留 DNS、TLS、连接被拒绝等传输层原因，但不会包含推送令牌。
 
-上传数据仅包含白名单中的统计字段，不包含提示词、模型回复、失败响应体、上游令牌或任意请求头。完整的客户端 API Key 会通过 HTTPS 传输，以保留 Keeper 现有的 Key 分组和脱敏展示功能。费用由 Keeper 统一计算。
+上传数据仅包含白名单中的统计字段，不包含提示词、模型回复、失败响应体、上游令牌或任意请求头。上传数据会包含完整的客户端 API Key，以保留 Keeper 现有的 Key 分组和脱敏展示功能。HTTPS 会加密传输，HTTP 则明文传输。费用由 Keeper 统一计算。
 
 ## 检查本地隔离记录
 

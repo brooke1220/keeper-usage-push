@@ -324,13 +324,15 @@ func TestPostmanSimulationTransport(t *testing.T) {
 		t.Skip("set KEEPER_PUSH_SIMULATION_ENDPOINT to run real HTTP against the saved Postman simulation")
 	}
 	cfg := configFor(t, endpoint)
-	cfg.AllowHTTPLoopback = true
 	q := openQueue(t, cfg)
 	if err := q.Enqueue(record(t)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := q.Flush(context.Background()); err == nil {
 		t.Fatal("simulation's first 503 was not propagated")
+	}
+	if s, err := q.Stats(); err != nil || s.Pending != 1 {
+		t.Fatalf("failed HTTP upload was not retained: %+v %v", s, err)
 	}
 	if _, err := q.Flush(context.Background()); err != nil {
 		t.Fatal(err)

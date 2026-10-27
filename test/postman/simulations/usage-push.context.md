@@ -6,6 +6,8 @@ Start from the repository root with `postman simulation run test/postman/simulat
 
 From the repository root run `KEEPER_PUSH_SIMULATION_ENDPOINT=http://127.0.0.1:4907/keeper/api/v1/ingest/usage go test ./push -run TestPostmanSimulationTransport -count=1 -v`.
 
+On 2026-10-27 the same command passed without an HTTP opt-in setting against Postman CLI 1.73.0. The only member, `keeper-usage-receiver`, served the upload and its retry: 503 followed by 200 with the same delivery ID. The test checked that the failed upload remained pending and the acknowledged retry cleared it. This run used local test data; the deployed Keeper endpoint was not contacted.
+
 On 2026-10-26 this test passed against Postman CLI 1.73.0. The simulation logged two real POST requests, first 503 and then 200, carrying the same delivery ID. The plugin retained the first failed upload and deleted its queue entry only after acknowledgement. All simulation members served traffic. No real CPA credentials or central server were used; this proves HTTP retry handling against the saved stand-in, independently of the real Keeper integration tests.
 
 CLI details established during this run: use a `version: 1` mock manifest and point the simulation at its `config.yaml`, rather than the folder. No files were published to a workspace. Request logs are temporary and are not committed.
