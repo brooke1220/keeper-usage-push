@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux/amd64
+            runner: ubuntu-latest
+          - target: linux/arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin/arm64
+            runner: macos-latest
+          - target: darwin/amd64
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        if: startsWith(matrix.target, 'darwin/arm64') || matrix.target == 'linux/amd64'
+        run: go test -race ./...
+      - name: Build and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/package-release.sh "${GITHUB_REF_NAME#v}" "${{ matrix.target }}"
+          target="${{ matrix.target }}"
+          echo "ARTIFACT=release-${target//\//-}" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: |
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: Collect assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -name '*.zip' -exec cp {} release/ \;
+          cat artifacts/*/checksums.txt | sort -k2 > release/checksums.txt
+          (cd release && sha256sum -c checksums.txt)
+          ls -l release
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            release/*.zip
+            release/checksums.txt
+          generate_release_notes: true

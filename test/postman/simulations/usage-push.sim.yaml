@@ -1,0 +1,6 @@
+simulation: usage-push-recovery
+routing: path
+mocks:
+  - name: keeper-usage-receiver
+    routeKey: keeper
+    path: test/postman/mocks/keeper-usage-receiver/config.yaml

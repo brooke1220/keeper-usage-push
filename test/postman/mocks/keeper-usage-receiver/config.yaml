@@ -1,0 +1,10 @@
+version: 1
+name: keeper-usage-receiver
+slug: keeper-usage-receiver
+protocol: http
+port: 4908
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true
