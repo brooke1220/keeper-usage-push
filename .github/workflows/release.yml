@@ -22,6 +22,8 @@ jobs:
             runner: macos-latest
           - target: darwin/amd64
             runner: macos-latest
+          - target: windows/amd64
+            runner: windows-latest
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -29,8 +31,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Set up Windows C compiler
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "C:/mingw64/bin" >> "$GITHUB_PATH"
       - name: Test
-        if: startsWith(matrix.target, 'darwin/arm64') || matrix.target == 'linux/amd64'
+        if: matrix.target == 'darwin/arm64' || matrix.target == 'linux/amd64' || matrix.target == 'windows/amd64'
+        env:
+          CGO_ENABLED: '1'
         run: go test -race ./...
       - name: Build and package
         shell: bash

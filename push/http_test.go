@@ -166,7 +166,10 @@ func TestTransportErrorKeepsCause(t *testing.T) {
 	}
 	_, err := q.Flush(context.Background())
 	var opErr *net.OpError
-	if err == nil || !errors.As(err, &opErr) || !errors.Is(err, syscall.ECONNREFUSED) {
+	// Windows reports Winsock errors rather than Unix ECONNREFUSED. Both must
+	// retain the network operation and its underlying OS error for diagnosis.
+	var errno syscall.Errno
+	if err == nil || !errors.As(err, &opErr) || !errors.As(err, &errno) {
 		t.Fatalf("transport error lost its cause: %v", err)
 	}
 	if strings.Contains(err.Error(), strings.Repeat("t", 32)) {

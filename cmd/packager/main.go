@@ -61,15 +61,19 @@ func packTool(tool, version, goos, goarch, outDir string) (string, error) {
 	if goos == "" || goarch == "" {
 		return "", fmt.Errorf("goos and goarch are required")
 	}
-	if filepath.Base(tool) != toolName {
-		return "", fmt.Errorf("tool must be the %s executable, got %s", toolName, tool)
+	entryName := toolName
+	if goos == "windows" {
+		entryName += ".exe"
+	}
+	if filepath.Base(tool) != entryName {
+		return "", fmt.Errorf("tool must be the %s executable, got %s", entryName, tool)
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", err
 	}
 	name := fmt.Sprintf("%s_%s_%s_%s.zip", toolName, version, goos, goarch)
 	archive := filepath.Join(outDir, name)
-	if err := writeZip(archive, tool, toolName); err != nil {
+	if err := writeZip(archive, tool, entryName); err != nil {
 		return "", err
 	}
 	sum, err := fileSHA256(archive)

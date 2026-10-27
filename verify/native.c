@@ -1,4 +1,8 @@
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,9 +28,15 @@ static int verify_call(plugin_api *api, const char *request, int expect_success)
 
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
+#ifdef _WIN32
+    HMODULE library = LoadLibraryA(argv[1]);
+    if (!library) { fprintf(stderr, "LoadLibrary failed: %lu\n", (unsigned long)GetLastError()); return 1; }
+    init_fn initialize = (init_fn)GetProcAddress(library, "cliproxy_plugin_init");
+#else
     void *library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (!library) { fprintf(stderr, "%s\n", dlerror()); return 1; }
     init_fn initialize = (init_fn)dlsym(library, "cliproxy_plugin_init");
+#endif
     plugin_api api = {0};
     if (!initialize || initialize(NULL, &api) != 0 || api.abi_version != 1 || !api.call || !api.free_buffer || !api.shutdown) {
         fprintf(stderr, "invalid native plugin ABI\n"); return 1;

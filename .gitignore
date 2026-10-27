@@ -5,4 +5,5 @@
 *.h
 !verify/*.c
 /keeper-push-spool
+/keeper-push-spool.exe
 .DS_Store

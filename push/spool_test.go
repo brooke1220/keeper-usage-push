@@ -11,13 +11,7 @@ import (
 func assertPrivateSpool(t *testing.T, dir string) {
 	t.Helper()
 	for _, name := range []string{"", "outbox.db", "outbox.db-wal", "outbox.db-shm"} {
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm()&0077 != 0 {
-			t.Errorf("%s is accessible to other users: mode %04o", name, info.Mode().Perm())
-		}
+		assertPrivateSpoolPath(t, filepath.Join(dir, name))
 	}
 }
 
@@ -34,9 +28,7 @@ func TestSpoolFilesArePrivate(t *testing.T) {
 				if err := os.Mkdir(cfg.SpoolDir, 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Chmod(cfg.SpoolDir, 0755); err != nil {
-					t.Fatal(err)
-				}
+				makeSpoolPathPublic(t, cfg.SpoolDir, 0755)
 			}
 			q := openQueue(t, cfg)
 			if err := q.Enqueue(record(t)); err != nil {
@@ -78,13 +70,28 @@ func TestSpoolReopensLegacyFilesPrivately(t *testing.T) {
 		if name == "" {
 			mode = 0755
 		}
-		if err := os.Chmod(filepath.Join(cfg.SpoolDir, name), mode); err != nil {
-			t.Fatal(err)
-		}
+		makeSpoolPathPublic(t, filepath.Join(cfg.SpoolDir, name), mode)
 	}
 	q := openQueue(t, cfg)
 	assertPrivateSpool(t, cfg.SpoolDir)
 	if stats, err := q.Stats(); err != nil || stats.Pending != 1 {
 		t.Fatalf("repairing permissions lost the committed record: %+v %v", stats, err)
 	}
+}
+
+func TestSpoolSupportsSpecialPath(t *testing.T) {
+	cfg := configFor(t, "https://keeper.invalid")
+	cfg.SpoolDir = filepath.Join(cfg.SpoolDir, "队列 # %")
+	q := openQueue(t, cfg)
+	if err := q.Enqueue(record(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openQueue(t, cfg)
+	if stats, err := reopened.Stats(); err != nil || stats.Pending != 1 {
+		t.Fatalf("special path did not preserve its pending record: %+v %v", stats, err)
+	}
+	assertPrivateSpool(t, cfg.SpoolDir)
 }

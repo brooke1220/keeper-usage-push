@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,7 +77,7 @@ func Open(config Config) (*Queue, error) {
 		return nil, fmt.Errorf("create usage spool: %w", err)
 	}
 	// MkdirAll leaves an existing directory's permissions unchanged.
-	if err := os.Chmod(cfg.SpoolDir, 0700); err != nil {
+	if err := secureSpoolPath(cfg.SpoolDir, 0700); err != nil {
 		return nil, fmt.Errorf("secure usage spool directory: %w", err)
 	}
 	lock, err := lockSpool(filepath.Join(cfg.SpoolDir, "writer.lock"))
@@ -92,7 +93,13 @@ func Open(config Config) (*Queue, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	u := url.URL{Scheme: "file", Path: path}
+	// SQLite file URIs use forward slashes, including /C:/... on Windows.
+	// url.URL also escapes spaces, percent signs and # in the spool path.
+	uriPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	v := url.Values{}
 	v.Set("_journal_mode", "WAL")
 	v.Set("_synchronous", "FULL")

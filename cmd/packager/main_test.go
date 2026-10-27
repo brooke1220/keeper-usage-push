@@ -88,3 +88,39 @@ func TestPackRejectsMismatchedInput(t *testing.T) {
 		}
 	}
 }
+
+func TestPackWindowsDLLAndSpoolEXE(t *testing.T) {
+	dir := t.TempDir()
+	library := filepath.Join(dir, "keeper-usage-push.dll")
+	tool := filepath.Join(dir, "keeper-push-spool.exe")
+	for _, path := range []string{library, tool} {
+		if err := os.WriteFile(path, []byte("MZ"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "dist")
+	names, err := packAll(library, tool, "1.2.3", "windows", "amd64", out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"keeper-usage-push_1.2.3_windows_amd64.zip": "keeper-usage-push.dll",
+		"keeper-push-spool_1.2.3_windows_amd64.zip": "keeper-push-spool.exe",
+	}
+	if len(names) != len(want) {
+		t.Fatalf("unexpected Windows assets: %v", names)
+	}
+	for _, name := range names {
+		reader, err := zip.OpenReader(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(reader.File) != 1 || reader.File[0].Name != want[name] {
+			t.Errorf("unexpected contents of %s: %+v", name, reader.File)
+		}
+		_ = reader.Close()
+	}
+	if _, err := packTool(strings.TrimSuffix(tool, ".exe"), "1.2.3", "windows", "amd64", out); err == nil {
+		t.Fatal("Windows spool tool must retain its .exe extension")
+	}
+}
