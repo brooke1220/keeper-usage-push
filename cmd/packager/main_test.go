@@ -37,6 +37,45 @@ func TestPackMatchesPluginStoreLayout(t *testing.T) {
 	}
 }
 
+func TestPackShipsSpoolToolSeparately(t *testing.T) {
+	dir := t.TempDir()
+	library := filepath.Join(dir, "keeper-usage-push.so")
+	tool := filepath.Join(dir, "keeper-push-spool")
+	for _, path := range []string{library, tool} {
+		if err := os.WriteFile(path, []byte("elf"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "dist")
+	names, err := packAll(library, tool, "1.2.3", "linux", "amd64", out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] != "keeper-usage-push_1.2.3_linux_amd64.zip" || names[1] != "keeper-push-spool_1.2.3_linux_amd64.zip" {
+		t.Fatalf("unexpected archives: %v", names)
+	}
+	reader, err := zip.OpenReader(filepath.Join(out, names[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	if len(reader.File) != 1 || reader.File[0].Name != "keeper-push-spool" || reader.File[0].Mode().Perm()&0o111 == 0 {
+		t.Fatalf("tool archive must hold only the executable at its root: %+v", reader.File)
+	}
+	sums, err := os.ReadFile(filepath.Join(out, "checksums.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if !strings.Contains(string(sums), "  "+name+"\n") {
+			t.Fatalf("checksums.txt lacks %s:\n%s", name, sums)
+		}
+	}
+	if _, err := packAll(library, library, "1.2.3", "linux", "amd64", out); err == nil {
+		t.Fatal("accepted the plugin library as the spool tool")
+	}
+}
+
 func TestPackRejectsMismatchedInput(t *testing.T) {
 	dir := t.TempDir()
 	library := filepath.Join(dir, "keeper-usage-push.so")

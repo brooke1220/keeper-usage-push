@@ -1,5 +1,6 @@
 // Command packager builds a CPA plugin-store release archive: a zip holding the shared library
-// at its root, named <id>_<version>_<goos>_<goarch>.zip, plus a checksums.txt line.
+// at its root, named <id>_<version>_<goos>_<goarch>.zip, plus a checksums.txt line. With -tool it
+// also packages the offline spool operator as a separate archive; the store skips that asset.
 package main
 
 import (
@@ -17,6 +18,9 @@ import (
 
 const pluginID = "keeper-usage-push"
 
+// toolName is the offline spool operator built from ./cmd/spool.
+const toolName = "keeper-push-spool"
+
 // versionPattern matches CPA's plugin version rule: no leading "v".
 var versionPattern = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]*$`)
 
@@ -26,20 +30,68 @@ func main() {
 	goos := flag.String("goos", "", "target GOOS")
 	goarch := flag.String("goarch", "", "target GOARCH")
 	outDir := flag.String("out", "dist", "output directory")
+	tool := flag.String("tool", "", "optional keeper-push-spool executable to package for the same target")
 	flag.Parse()
-	name, err := pack(*library, *version, *goos, *goarch, *outDir)
+	names, err := packAll(*library, *tool, *version, *goos, *goarch, *outDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "packager:", err)
 		os.Exit(1)
 	}
-	fmt.Println(name)
+	for _, name := range names {
+		fmt.Println(name)
+	}
+}
+
+func packAll(library, tool, version, goos, goarch, outDir string) ([]string, error) {
+	name, err := pack(library, version, goos, goarch, outDir)
+	if err != nil || tool == "" {
+		return []string{name}, err
+	}
+	toolArchive, err := packTool(tool, version, goos, goarch, outDir)
+	return []string{name, toolArchive}, err
+}
+
+// packTool writes <tool>_<version>_<goos>_<goarch>.zip holding the executable at its root.
+// The name does not match the plugin's, so the store never selects it as the plugin archive.
+func packTool(tool, version, goos, goarch, outDir string) (string, error) {
+	version, err := releaseVersion(version)
+	if err != nil {
+		return "", err
+	}
+	if goos == "" || goarch == "" {
+		return "", fmt.Errorf("goos and goarch are required")
+	}
+	if filepath.Base(tool) != toolName {
+		return "", fmt.Errorf("tool must be the %s executable, got %s", toolName, tool)
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("%s_%s_%s_%s.zip", toolName, version, goos, goarch)
+	archive := filepath.Join(outDir, name)
+	if err := writeZip(archive, tool, toolName); err != nil {
+		return "", err
+	}
+	sum, err := fileSHA256(archive)
+	if err != nil {
+		return "", err
+	}
+	return name, appendChecksum(filepath.Join(outDir, "checksums.txt"), sum, name)
+}
+
+func releaseVersion(version string) (string, error) {
+	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
+	if !versionPattern.MatchString(version) {
+		return "", fmt.Errorf("invalid version %q", version)
+	}
+	return version, nil
 }
 
 // pack writes the archive and appends its checksum, replacing a stale line for the same archive.
 func pack(library, version, goos, goarch, outDir string) (string, error) {
-	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
-	if !versionPattern.MatchString(version) {
-		return "", fmt.Errorf("invalid version %q", version)
+	version, err := releaseVersion(version)
+	if err != nil {
+		return "", err
 	}
 	if goos == "" || goarch == "" {
 		return "", fmt.Errorf("goos and goarch are required")

@@ -38,6 +38,8 @@ Official hosts do not send canonical token accounting, the inbound endpoint or r
 | Token breakdown (cache/reasoning buckets) | Not sent | Derived from the flat token counts with the CPA SDK's `EnsureTokenBreakdownForProvider`, which hosts use when an executor supplies none. Some upstream response shapes can only be classified as `unclassified`; reconcile costs against the pull channel during the pilot |
 | Success status code | `0` | Set to `200`; failures without a code become `500`, as in CPA's usage queue |
 | `endpoint`, `request_id` (request log), `node_kind`, `is_fork`, `is_compaction` | Not sent | Empty. Price rules or filters keyed on `endpoint` do not match |
+| `service_tier`, `reasoning_effort`, `stream` | Only the values the executor recorded | Sent as received. CPA's usage queue also falls back to request context, so these can be empty here when the pull channel has them |
+| Session IDs | Raw client values | Normalized to canonical UUIDs with the CPA SDK, as in CPA's usage queue |
 | Failure detected only from the HTTP response status | Recorded as success | Not recoverable in the plugin |
 | Drain before plugin unload | Official hosts unload plugins before stopping usage dispatch | Records still queued in CPA memory at shutdown can be lost on a normal restart |
 
@@ -60,7 +62,7 @@ Release archives for the plugin store:
 ./scripts/package-release.sh 0.4.0 linux/arm64 darwin/arm64  # selected targets
 ```
 
-Archives and `checksums.txt` are written to `dist/`. Linux targets are built in `quay.io/pypa/manylinux2014_*` containers, rejected if they need glibc newer than 2.17, and loaded once to validate the native ABI. `darwin` targets build natively and must run on macOS. The version is embedded with `-X main.Version`; the host logs `pluginhost: plugin registered ... version=<version>`.
+Archives and `checksums.txt` are written to `dist/`: the plugin archive for the store and `keeper-push-spool_<version>_<goos>_<goarch>.zip` with the offline spool tool. The store installs only the plugin archive. Linux targets are built in `quay.io/pypa/manylinux2014_*` containers, and both binaries are rejected if they need glibc newer than 2.17. The plugin library is loaded once to validate the native ABI. `darwin` targets build natively and must run on macOS. The version is embedded with `-X main.Version`; the host logs `pluginhost: plugin registered ... version=<version>`.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds linux/amd64, linux/arm64, darwin/arm64 and darwin/amd64 and publishes them with one combined `checksums.txt` as a GitHub Release. The store installs the latest release, so the tag (without `v`) is the plugin version.
 
@@ -118,15 +120,15 @@ The spool is bound to its exact endpoint; change `spool_dir` together with `endp
 - Only a complete, valid Keeper acknowledgement deletes rows. Process restarts, lost responses and re-batching preserve delivery IDs. Reusing a delivery ID with changed content is a protocol conflict.
 - A batch is split to isolate bad records in persistent local quarantine only when Keeper itself rejects it: 400 `invalid_batch`, 409 `delivery_id_conflict`, 413 `batch_too_large` or 422 `invalid_usage_event`. The same status without Keeper's error code (a proxy, WAF or older receiver) keeps the batch pending; a bare 413 is split but never quarantined. Authentication, redirects, network and server failures keep retrying.
 - A row that can never fit a batch is quarantined as `event_too_large` instead of blocking the rows behind it, and cannot be replayed.
-- The spool limit counts retained payload bytes, including quarantine. Allocate extra disk for SQLite pages, metadata and WAL. Exhaustion preserves existing records, logs a drop counter for new persistence failures and keeps model service available. An unwritable disk cannot persist its own new drop counter; CPA's log and the in-memory count expose the problem.
+- The spool limit counts retained payload bytes, including quarantine. Allocate extra disk for SQLite pages, metadata and WAL. Exhaustion preserves existing records, counts every new persistence failure and keeps model service available. The first failure is logged at once, then at most one log per minute with the total and the number dropped since the last log, so a full disk does not flood CPA's log. An unwritable disk cannot persist its own new drop counter; CPA's log and the in-memory count expose the problem.
 - Records still waiting in CPA memory can be lost on abrupt termination, and on official hosts also during a normal restart, because they unload plugins before stopping usage dispatch. The plugin never waits for remote delivery at shutdown. Permanent disk loss and coordinated restoration of old central backups are outside the delivery guarantee.
-- Logs go to CPA's logger through the host log callback. Idle queue status is logged at debug level; new quarantines or drops are logged as warnings. Upload errors keep their transport cause (DNS, TLS, refused connection) and never contain the push token.
+- Logs go to CPA's logger through the host log callback. Idle queue status is logged at debug level; new quarantines are logged as warnings, and drops as rate-limited errors. Upload errors keep their transport cause (DNS, TLS, refused connection) and never contain the push token.
 
 The payload whitelists statistical fields. It excludes prompts, responses, failure bodies, upstream tokens and arbitrary headers. Full client Keys are intentionally transmitted over HTTPS so Keeper can retain its existing Key grouping and masked display behavior. Fees are calculated centrally.
 
 ## Inspect local quarantine
 
-Stop CPA. Save the plugin-owned configuration (the fields below `keeper-usage-push`, without `enabled` or the wrapper) as a private YAML file. Inspection never uploads data or prints Keys/payloads:
+Download `keeper-push-spool_<version>_<goos>_<goarch>.zip` from the same release as the plugin and check it against `checksums.txt`. Stop CPA. Save the plugin-owned configuration (the fields below `keeper-usage-push`, without `enabled` or the wrapper) as a private YAML file. Inspection never uploads data or prints Keys/payloads:
 
 ```sh
 keeper-push-spool --config /etc/cpa/usage-push.yaml

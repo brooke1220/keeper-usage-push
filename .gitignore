@@ -4,3 +4,5 @@
 *.dll
 *.h
 !verify/*.c
+/keeper-push-spool
+.DS_Store

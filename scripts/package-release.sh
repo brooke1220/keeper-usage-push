@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Builds plugin-store release archives into dist/: keeper-usage-push_<version>_<goos>_<goarch>.zip
-# plus checksums.txt. Linux targets are built in manylinux2014 containers so the library needs
-# only GLIBC 2.17, like official CPA Linux archives. darwin targets build natively on macOS.
+# Builds plugin-store release archives into dist/: keeper-usage-push_<version>_<goos>_<goarch>.zip,
+# the offline spool operator keeper-push-spool_<version>_<goos>_<goarch>.zip and checksums.txt.
+# Linux targets are built in manylinux2014 containers so both binaries need only GLIBC 2.17,
+# like official CPA Linux archives. darwin targets build natively on macOS.
 #
 # Usage: scripts/package-release.sh <version> [target ...]
 #   targets: linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 (default: both Linux targets)
@@ -40,10 +41,12 @@ build_linux() {
       CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="$LDFLAGS" -o "$out/keeper-usage-push.so" .
       CGO_ENABLED=1 go build -trimpath -ldflags="$LDFLAGS" -o "$out/keeper-push-spool" ./cmd/spool
       rm -f "$out/keeper-usage-push.h"
-      max_glibc="$(readelf --version-info "$out/keeper-usage-push.so" | sed -n "s/.*Name: GLIBC_\([0-9.]*\).*/\1/p" | sort -V | tail -n 1)"
-      if [ -n "$max_glibc" ] && [ "$(printf "2.17\n%s\n" "$max_glibc" | sort -V | tail -n 1)" != "2.17" ]; then
-        echo "keeper-usage-push.so requires GLIBC_${max_glibc}, expected 2.17 or older" >&2; exit 1
-      fi
+      for binary in keeper-usage-push.so keeper-push-spool; do
+        max_glibc="$(readelf --version-info "$out/$binary" | sed -n "s/.*Name: GLIBC_\([0-9.]*\).*/\1/p" | sort -V | tail -n 1)"
+        if [ -n "$max_glibc" ] && [ "$(printf "2.17\n%s\n" "$max_glibc" | sort -V | tail -n 1)" != "2.17" ]; then
+          echo "$binary requires GLIBC_${max_glibc}, expected 2.17 or older" >&2; exit 1
+        fi
+      done
       gcc -Wall -Wextra verify/native.c -ldl -o /tmp/verify-native
       /tmp/verify-native "$out/keeper-usage-push.so"
       chown -R "$HOST_UID:$HOST_GID" dist
@@ -57,6 +60,8 @@ build_darwin() {
   [ "$arch" = "$(go env GOHOSTARCH)" ] || cc=(clang -arch "$([ "$arch" = amd64 ] && echo x86_64 || echo arm64)")
   CC="${cc[*]}" CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" GOFLAGS=-mod=readonly \
     go build -trimpath -buildmode=c-shared -ldflags="$LDFLAGS" -o "$out/keeper-usage-push.dylib" .
+  CC="${cc[*]}" CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" GOFLAGS=-mod=readonly \
+    go build -trimpath -ldflags="$LDFLAGS" -o "$out/keeper-push-spool" ./cmd/spool
   rm -f "$out/keeper-usage-push.h"
   if [ "$arch" = "$(go env GOHOSTARCH)" ]; then
     cc -Wall -Wextra verify/native.c -o "$out/verify-native"
@@ -73,7 +78,8 @@ for target in "${TARGETS[@]}"; do
     darwin) build_darwin "$goarch"; lib="dist/build/darwin_${goarch}/keeper-usage-push.dylib" ;;
     *) echo "unsupported target $target (Windows is not supported)" >&2; exit 1 ;;
   esac
-  go run ./cmd/packager -lib "$lib" -version "$VERSION" -goos "$goos" -goarch "$goarch" -out "$DIST"
+  go run ./cmd/packager -lib "$lib" -tool "$(dirname "$lib")/keeper-push-spool" \
+    -version "$VERSION" -goos "$goos" -goarch "$goarch" -out "$DIST"
 done
 
 echo "==> ${DIST}/"

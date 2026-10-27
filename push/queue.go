@@ -28,6 +28,9 @@ var ErrSpoolLocked = errors.New("usage spool already has a writer")
 // codeEventTooLarge marks rows that can never fit an upload batch; replay would only re-quarantine them.
 const codeEventTooLarge = "event_too_large"
 
+// dropLogInterval is the shortest gap between persistence-failure logs after the first one.
+const dropLogInterval = time.Minute
+
 type Queue struct {
 	cfg               Config
 	db                *sql.DB
@@ -40,6 +43,12 @@ type Queue struct {
 	closeOnce         sync.Once
 	dropped           atomic.Uint64
 	enqueuedSinceWake atomic.Uint64
+	// dropLog rate-limits persistence-failure logs; last keeps a monotonic clock reading.
+	dropLog struct {
+		sync.Mutex
+		last     time.Time
+		unlogged uint64
+	}
 	// lastStats is owned by the upload worker and only used to decide log levels.
 	lastStats Stats
 }
@@ -183,9 +192,18 @@ func (q *Queue) Enqueue(r UsageRecord) error {
 func (q *Queue) dropAfterRollback(tx *sql.Tx, err error) error { _ = tx.Rollback(); return q.drop(err) }
 func (q *Queue) drop(err error) error {
 	n := q.dropped.Add(1)
-	// SQLite may be unwritable. The counter and stderr still expose new losses.
+	// SQLite may be unwritable. The counter and CPA's log still expose new losses.
 	_, _ = q.db.Exec("UPDATE state SET dropped=? WHERE id=1", n)
-	log.WithField("dropped", n).Error("keeper usage push: local persistence failed")
+	// A full or failing disk drops every record. Logging each one would flood CPA's log, which
+	// often shares that disk, so log the first drop and then at most once per interval.
+	q.dropLog.Lock()
+	defer q.dropLog.Unlock()
+	q.dropLog.unlogged++
+	if !q.dropLog.last.IsZero() && time.Since(q.dropLog.last) < dropLogInterval {
+		return err
+	}
+	log.WithError(err).WithFields(log.Fields{"dropped": q.dropped.Load(), "dropped_since_last_log": q.dropLog.unlogged}).Error("keeper usage push: local persistence failed")
+	q.dropLog.last, q.dropLog.unlogged = time.Now(), 0
 	return err
 }
 
@@ -314,11 +332,12 @@ func (q *Queue) Close() error {
 	return err
 }
 
-// logStats keeps idle cycles quiet and warns when records leave the normal delivery path.
+// logStats keeps idle cycles quiet and warns when records are quarantined. Drops are reported
+// by drop() at a limited rate; warning here too would repeat them on every flush.
 func (q *Queue) logStats(s Stats) {
 	entry := log.WithFields(log.Fields{"pending": s.Pending, "quarantined": s.Quarantined, "bytes": s.Bytes, "dropped": s.Dropped, "last_success": s.LastSuccess})
-	if s.Quarantined > q.lastStats.Quarantined || s.Dropped > q.lastStats.Dropped {
-		entry.Warn("keeper usage push: records were quarantined or dropped; inspect the local spool")
+	if s.Quarantined > q.lastStats.Quarantined {
+		entry.Warn("keeper usage push: records were quarantined; inspect the local spool")
 	} else {
 		entry.Debug("keeper usage push queue")
 	}
