@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	coresession "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/session"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 )
 
@@ -57,6 +58,30 @@ func TestHostAccountingIsPreservedAndValidated(t *testing.T) {
 	r.AccountingVersion = 3
 	if err := canonicalAccounting(&r); err == nil {
 		t.Fatal("unknown accounting version accepted")
+	}
+}
+
+func TestSessionIDsMatchRedisQueue(t *testing.T) {
+	const uuid = "0f8fad5b-d9cb-469f-a165-70867728950e"
+	for _, tc := range []struct{ session, parent, wantSession, wantParent string }{
+		{" " + strings.ToUpper(uuid) + " ", "", uuid, ""},
+		{"claude:" + uuid, "opaque-parent", uuid, coresession.NormalizeToCanonicalUUID("opaque-parent")},
+		{uuid, uuid, uuid, ""},
+		{"", uuid, "", ""},
+	} {
+		r := record(t)
+		r.SessionID, r.ParentSessionID = tc.session, tc.parent
+		raw, err := payload(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got usagePayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.SessionID != tc.wantSession || got.ParentSessionID != tc.wantParent {
+			t.Fatalf("session %q parent %q: got %q %q, want %q %q", tc.session, tc.parent, got.SessionID, got.ParentSessionID, tc.wantSession, tc.wantParent)
+		}
 	}
 }
 
