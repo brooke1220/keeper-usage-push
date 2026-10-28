@@ -194,6 +194,121 @@ func TestBareSingleEvent413StaysPending(t *testing.T) {
 	}
 }
 
+// A Keeper that predates credential display metadata rejects the unknown field with 422. The
+// usage must still arrive; a retry must resend identical stripped bytes, and an event Keeper
+// rejects for another reason is isolated with its original payload.
+func TestIdentityRejectionResendsUsageWithoutIdentity(t *testing.T) {
+	stripped := map[string]string{}
+	unavailable := true
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b Batch
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		reject := false
+		for _, e := range b.Events {
+			if strings.Contains(string(e.Usage), `"identity"`) {
+				reject = true
+				continue
+			}
+			if previous, ok := stripped[e.ID]; ok && previous != string(e.Usage) {
+				t.Error("a retry changed a stripped payload")
+			}
+			stripped[e.ID] = string(e.Usage)
+			reject = reject || strings.Contains(string(e.Usage), "bad-model")
+		}
+		if reject {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = io.WriteString(w, `{"error":"invalid_usage_event"}`)
+			return
+		}
+		if unavailable {
+			unavailable = false
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		ack(w, b)
+	}))
+	defer server.Close()
+	q := openQueue(t, configFor(t, server.URL))
+	q.client = server.Client()
+	for _, model := range []string{"model-a", "model-b", "bad-model"} {
+		r := record(t)
+		r.Model, r.AuthIndex = model, "idx"
+		r.Identity = &IdentityMetadata{DisplayName: "Channel A", ProviderType: "codex"}
+		if err := q.Enqueue(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := q.Flush(context.Background()); err == nil {
+		t.Fatal("unavailable receiver acknowledged the stripped batch")
+	}
+	stats, err := q.Stats()
+	if err != nil || stats.Pending != 3 || stats.Quarantined != 0 {
+		t.Fatalf("identity rejection lost usage: %+v %v", stats, err)
+	}
+	if _, err := q.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = q.Stats()
+	if err != nil || stats.Pending != 0 || stats.Quarantined != 1 {
+		t.Fatalf("stripped usage was not delivered or the bad event was not isolated: %+v %v", stats, err)
+	}
+	var raw []byte
+	if err := q.db.QueryRow("SELECT payload FROM outbox").Scan(&raw); err != nil || !strings.Contains(string(raw), `"identity"`) || !strings.Contains(string(raw), "bad-model") {
+		t.Fatalf("quarantined row lost its original payload: %s %v", raw, err)
+	}
+}
+
+// An acknowledgement lost before Keeper was upgraded leaves Keeper holding the stripped copy.
+// The upgraded Keeper then answers the original with 409, and the stripped copy completes it.
+func TestIdentityConflictAcceptsStrippedCopy(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var b Batch
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		if strings.Contains(string(b.Events[0].Usage), `"identity"`) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error":"delivery_id_conflict"}`)
+			return
+		}
+		ack(w, b)
+	}))
+	defer server.Close()
+	q := openQueue(t, configFor(t, server.URL))
+	q.client = server.Client()
+	r := record(t)
+	r.AuthIndex, r.Identity = "idx", &IdentityMetadata{DisplayName: "Channel A"}
+	if err := q.Enqueue(r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := q.Stats()
+	if err != nil || stats.Pending != 0 || stats.Quarantined != 0 || calls.Load() != 2 {
+		t.Fatalf("stripped copy did not settle the conflict: %+v calls=%d %v", stats, calls.Load(), err)
+	}
+}
+
+func TestWithoutIdentityIsDeterministicAndKeepsOtherFields(t *testing.T) {
+	events := []Event{
+		{ID: "a", Usage: json.RawMessage(`{"model":"m","identity":{"display_name":"A"},"tokens":{"input_tokens":1}}`)},
+		{ID: "b", Usage: json.RawMessage(`{"model":"n"}`)},
+		{ID: "c", Usage: json.RawMessage(`not json`)},
+	}
+	first, changed := withoutIdentity(events)
+	second, _ := withoutIdentity(events)
+	if !changed || string(first[0].Usage) != `{"model":"m","tokens":{"input_tokens":1}}` || string(first[0].Usage) != string(second[0].Usage) {
+		t.Fatalf("stripped payload = %s", first[0].Usage)
+	}
+	if string(first[1].Usage) != `{"model":"n"}` || string(first[2].Usage) != "not json" || string(events[0].Usage) == string(first[0].Usage) {
+		t.Fatal("stripping changed events without identity or mutated the input")
+	}
+	if _, changed := withoutIdentity(events[1:]); changed {
+		t.Fatal("events without identity reported a change")
+	}
+}
+
 func TestTransportErrorKeepsCause(t *testing.T) {
 	q := openQueue(t, configFor(t, "https://127.0.0.1:1/api/v1/ingest/usage"))
 	if err := q.Enqueue(record(t)); err != nil {

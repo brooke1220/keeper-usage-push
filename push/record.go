@@ -47,10 +47,20 @@ type UsageRecord struct {
 	Failed               bool
 	Failure              UsageFailure
 	Detail               UsageDetail
+	// Identity contains only display metadata resolved through a read-only host callback.
+	// It is never decoded from the host's record, whose keys are untagged Go field names.
+	Identity *IdentityMetadata `json:"-"`
 
-	// Decoded only so tests can prove they never reach the payload.
+	// Never copied into the payload. Source can hold the upstream API key, so identity
+	// resolution compares display names against it; tests prove neither field leaks.
 	Source          string
 	ResponseHeaders http.Header
+}
+
+// IdentityMetadata deliberately excludes Account, Source, credentials and auth JSON.
+type IdentityMetadata struct {
+	DisplayName  string `json:"display_name"`
+	ProviderType string `json:"provider_type,omitempty"`
 }
 
 type UsageFailure struct {

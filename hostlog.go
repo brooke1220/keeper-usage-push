@@ -44,13 +44,16 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	hostAPI       atomic.Pointer[C.keeper_host_api]
-	hostLogMethod = C.CString("host.log") // Allocated once for the process lifetime.
-	hostLogOnce   sync.Once
+	hostAPI atomic.Pointer[C.keeper_host_api]
+	// Method names are allocated once for the process lifetime.
+	hostLogMethod            = C.CString(pluginabi.MethodHostLog)
+	hostAuthGetRuntimeMethod = C.CString(pluginabi.MethodHostAuthGetRuntime)
+	hostLogOnce              sync.Once
 	// hostLogFallback receives entries the host did not accept.
 	hostLogFallback io.Writer = os.Stderr
 )
@@ -100,20 +103,27 @@ func (hostLogHook) Fire(entry *log.Entry) error {
 }
 
 func forwardHostLog(raw []byte) bool {
+	envelope, rc := invokeHostMethod(hostLogMethod, raw)
+	return hostLogAccepted(rc, envelope)
+}
+
+// invokeHostMethod is the native callback channel shared by host.log and identity lookups.
+// Callers decode only the fields they need and never log the raw response.
+func invokeHostMethod(method *C.char, raw []byte) ([]byte, int) {
 	host := hostAPI.Load()
 	if host == nil {
-		return false
+		return nil, 1
 	}
 	request := C.CBytes(raw)
 	defer C.free(request)
 	var response C.keeper_host_buffer
-	rc := C.keeper_host_call(host, hostLogMethod, (*C.uint8_t)(request), C.size_t(len(raw)), &response)
+	rc := C.keeper_host_call(host, method, (*C.uint8_t)(request), C.size_t(len(raw)), &response)
 	var envelope []byte
 	if response.ptr != nil {
 		envelope = C.GoBytes(response.ptr, C.int(response.len))
 		C.keeper_host_free(host, response.ptr, response.len)
 	}
-	return hostLogAccepted(int(rc), envelope)
+	return envelope, int(rc)
 }
 
 // hostLogAccepted reports whether the host logged the entry. The host answers a rejected call,

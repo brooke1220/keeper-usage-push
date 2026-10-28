@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const maxResponseBytes = 64 << 10
@@ -21,36 +23,75 @@ var permanentRejections = map[int]string{
 }
 
 func (q *Queue) deliver(parent context.Context, events []Event) error {
-	body, err := q.MarshalBatch(events)
+	status, raw, err := q.send(parent, events)
 	if err != nil {
 		return err
 	}
-	if len(body) > MaxBatchBytes {
-		return fmt.Errorf("usage batch exceeds size limit")
+	if status == http.StatusOK {
+		return q.confirm(events, raw)
 	}
-	status, raw, err := q.post(parent, body)
-	if err != nil {
-		return err
-	}
-	if status != http.StatusOK {
-		code := keeperErrorCode(raw)
-		permanent := code != "" && permanentRejections[status] == code
-		// A proxy body limit also answers 413 without Keeper's code; smaller batches may pass it.
-		if (permanent || status == http.StatusRequestEntityTooLarge) && len(events) > 1 {
-			mid := len(events) / 2
-			if err := q.deliver(parent, events[:mid]); err != nil {
+	code := keeperErrorCode(raw)
+	permanent := code != "" && permanentRejections[status] == code
+	// Credential display metadata is optional, so a Keeper that predates it, or rejects a value,
+	// must not cost the usage. Stripping is deterministic and the spool keeps the original
+	// bytes: a retry after a lost acknowledgement resends identical content, and events that
+	// are isolated below keep their names for a replay after Keeper is upgraded.
+	// A 409 is retried the same way: Keeper may hold the stripped copy from an attempt whose
+	// acknowledgement was lost before Keeper was upgraded to accept identity.
+	if permanent && (status == http.StatusUnprocessableEntity || status == http.StatusConflict) {
+		if stripped, ok := withoutIdentity(events); ok {
+			strippedStatus, strippedRaw, err := q.send(parent, stripped)
+			if err != nil {
 				return err
 			}
-			return q.deliver(parent, events[mid:])
+			if strippedStatus == http.StatusOK {
+				// A 409 means Keeper already holds the stripped copy, not that it rejects identity.
+				if status == http.StatusUnprocessableEntity && q.identityRejected.CompareAndSwap(false, true) {
+					log.Warn("keeper usage push: Keeper rejected credential display metadata; usage was uploaded without it. Upgrade Keeper to record credential names")
+				}
+				return q.confirm(stripped, strippedRaw)
+			}
+			strippedCode := keeperErrorCode(strippedRaw)
+			if strippedCode == "" || permanentRejections[strippedStatus] != strippedCode {
+				return uploadStatusError(strippedStatus, strippedCode)
+			}
+			// Keeper rejects the batch without identity too: isolate the original events below.
 		}
-		if permanent {
-			return q.quarantine(events, fmt.Sprintf("http_%d_%s", status, code))
-		}
-		if code != "" {
-			return fmt.Errorf("usage upload returned status %d (%s)", status, code)
-		}
-		return fmt.Errorf("usage upload returned status %d", status)
 	}
+	// A proxy body limit also answers 413 without Keeper's code; smaller batches may pass it.
+	if (permanent || status == http.StatusRequestEntityTooLarge) && len(events) > 1 {
+		mid := len(events) / 2
+		if err := q.deliver(parent, events[:mid]); err != nil {
+			return err
+		}
+		return q.deliver(parent, events[mid:])
+	}
+	if permanent {
+		return q.quarantine(events, fmt.Sprintf("http_%d_%s", status, code))
+	}
+	return uploadStatusError(status, code)
+}
+
+func (q *Queue) send(parent context.Context, events []Event) (int, []byte, error) {
+	body, err := q.MarshalBatch(events)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(body) > MaxBatchBytes {
+		return 0, nil, fmt.Errorf("usage batch exceeds size limit")
+	}
+	return q.post(parent, body)
+}
+
+func uploadStatusError(status int, code string) error {
+	if code != "" {
+		return fmt.Errorf("usage upload returned status %d (%s)", status, code)
+	}
+	return fmt.Errorf("usage upload returned status %d", status)
+}
+
+// confirm deletes events only when Keeper acknowledged exactly this batch.
+func (q *Queue) confirm(events []Event, raw []byte) error {
 	if len(raw) > maxResponseBytes {
 		return fmt.Errorf("invalid usage acknowledgement")
 	}

@@ -9,6 +9,11 @@ http.createServer((req, res) => {
     calls++;
     if (calls === 1) { res.writeHead(503); res.end(JSON.stringify({ error: 'durable_ingest_unavailable' })); return; }
     if (body.schema_version !== 1 || !Array.isArray(body.events)) { res.writeHead(400); res.end(); return; }
+    if (body.events.some(event => {
+      const identity = event.usage && event.usage.identity;
+      return identity && (!event.usage.auth_index || typeof identity.display_name !== 'string' || !identity.display_name.trim() ||
+        Object.keys(identity).some(key => !['display_name', 'provider_type'].includes(key)));
+    })) { res.writeHead(422); res.end(JSON.stringify({ error: 'invalid_usage_event' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ schema_version: 1, accepted_event_ids: body.events.map(event => event.delivery_event_id) }));
   };

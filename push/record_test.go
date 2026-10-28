@@ -61,6 +61,33 @@ func TestHostAccountingIsPreservedAndValidated(t *testing.T) {
 	}
 }
 
+func TestAvailableRequestMetadataAndIdentityReachOutbox(t *testing.T) {
+	q := openQueue(t, configFor(t, "https://keeper.invalid/api/v1/ingest/usage"))
+	var r UsageRecord
+	if err := json.Unmarshal([]byte(officialHostRecord), &r); err != nil {
+		t.Fatal(err)
+	}
+	r.ReasoningEffort, r.ServiceTier, r.EffectiveServiceTier, r.ResponseServiceTier = "xhigh", "auto", "priority", "default"
+	r.Identity = &IdentityMetadata{DisplayName: "Channel A", ProviderType: "codex"}
+	if err := q.Enqueue(r); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := q.db.QueryRow("SELECT payload FROM outbox").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var got usagePayload
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ReasoningEffort != "xhigh" || got.ServiceTier != "auto" || got.EffectiveServiceTier != "priority" || got.ResponseServiceTier != "default" || !got.Stream || got.Identity == nil || *got.Identity != *r.Identity {
+		t.Fatal("available request or identity metadata was lost")
+	}
+	if got.Endpoint != "" || got.RequestID != "" || got.ExecutionID != r.RequestID || strings.Contains(string(raw), "sk-upstream-secret") {
+		t.Fatal("unavailable metadata was invented or an upstream secret was copied")
+	}
+}
+
 func TestSessionIDsMatchRedisQueue(t *testing.T) {
 	const uuid = "0f8fad5b-d9cb-469f-a165-70867728950e"
 	for _, tc := range []struct{ session, parent, wantSession, wantParent string }{

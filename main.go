@@ -96,6 +96,7 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 		return 1
 	}
 	installHostLogger(unsafe.Pointer(host))
+	usageIdentities.reset()
 	plugin.abi_version = C.uint32_t(pluginabi.ABIVersion)
 	plugin.call = C.cliproxy_plugin_call_fn(C.cliproxyPluginCall)
 	plugin.free_buffer = C.cliproxy_plugin_free_fn(C.cliproxyPluginFree)
@@ -150,6 +151,7 @@ func cliproxyPluginShutdown() {
 	}
 	// The host re-runs init when the same image is enabled again; start that instance afresh.
 	currentConfig, quiesced, rejectedSettings, unconfiguredWarned = push.Config{}, false, "", false
+	usageIdentities.reset()
 }
 
 func handle(method string, raw []byte) (any, error) {
@@ -164,6 +166,9 @@ func handle(method string, raw []byte) (any, error) {
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return nil, fmt.Errorf("invalid usage record")
 		}
+		// Resolved before taking the lifecycle lock, so a host round-trip never holds up a
+		// pending configure or quiesce.
+		r.Identity = usageIdentities.metadata(r)
 		lifecycle.RLock()
 		defer lifecycle.RUnlock()
 		if queue == nil {

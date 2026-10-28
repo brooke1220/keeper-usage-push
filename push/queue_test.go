@@ -325,7 +325,11 @@ func TestPostmanSimulationTransport(t *testing.T) {
 	}
 	cfg := configFor(t, endpoint)
 	q := openQueue(t, cfg)
-	if err := q.Enqueue(record(t)); err != nil {
+	r := record(t)
+	r.AuthIndex = "simulation-credential"
+	r.Identity = &IdentityMetadata{DisplayName: "Simulation Channel", ProviderType: "codex"}
+	r.ReasoningEffort, r.ServiceTier, r.EffectiveServiceTier, r.ResponseServiceTier = "xhigh", "auto", "priority", "default"
+	if err := q.Enqueue(r); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := q.Flush(context.Background()); err == nil {

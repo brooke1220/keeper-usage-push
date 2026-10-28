@@ -52,6 +52,8 @@ type Queue struct {
 	}
 	// lastStats is owned by the upload worker and only used to decide log levels.
 	lastStats Stats
+	// identityRejected logs a receiver's identity rejection once per queue.
+	identityRejected atomic.Bool
 }
 
 // QuarantinedEvent identifies a locally retained record without exposing its payload.

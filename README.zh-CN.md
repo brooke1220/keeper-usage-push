@@ -176,3 +176,9 @@ KEEPER_PUSH_SIMULATION_ENDPOINT=http://127.0.0.1:4907/keeper/api/v1/ingest/usage
 重新运行此场景前，请先重启模拟服务。无需发布到云端，也无需账户凭据。
 
 插件有意不上传 CPA 的旧版 `UsageRecord.Source` 字段，因为使用 API Key 凭据时，该字段可能包含上游密钥本身。上传令牌用于识别 CPA 安装实例；token 用量、计价及客户端 API Key 分组均不依赖旧版来源标签。
+
+### 凭据来源名称
+
+插件通过 CPA 的只读 `host.auth.get_runtime` 接口按 `AuthIndex` 查询凭据，仅上传 `identity.display_name` 和 `identity.provider_type`。名称依次取凭据标签（标签只是 provider 类型时跳过）、OAuth 邮箱、凭据文件名，因此 OAuth 凭据的显示名称通常就是账户邮箱，与 CPA 上报的 `Account` 相同。不转发整个查询结果、旧版 `Source`、上游密钥或凭据 JSON。文件和运行时 API Key 凭据正常查询名称；`config.yaml` 中的 API Key 凭据在 CPA 的运行时查询无法解析时不带名称，不再仅凭认证类型判断凭据来源。成功查询缓存五分钟，失败缓存三十秒；查询失败不影响用量保存和上传，刷新失败时保留上次缓存的名称。
+
+先升级 Keeper 才能记录凭据名称。旧接收端不认识可选的 `identity` 字段，会返回 422；插件随即去掉该字段重发这些事件并记录一条警告，用量照常送达，只是没有名称。升级 Keeper 之前，这类上传每次会多发一个请求。排队中的记录保持原始字节和投递编号。Keeper 按 CPA 来源与凭据编号关联新旧事件名称，推送来源不再被当作本机已删除凭据。推理强度、请求／实际发出／响应速度档位和流式标记继续按 CPA 给出的值传递；官方 v8 usage 回调缺少的入口路径和请求日志编号继续留空。
