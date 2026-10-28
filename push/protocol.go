@@ -97,12 +97,18 @@ func payload(r UsageRecord) ([]byte, error) {
 	if sessionID == "" || sessionID == parentSessionID {
 		parentSessionID = ""
 	}
+	// Official hosts send no request-log ID, but their TraceID falls back to the inbound request
+	// ID that the Redis queue reports as request_id. A host-supplied log ID still takes precedence.
+	requestLogID := r.RequestLogID
+	if requestLogID == "" {
+		requestLogID = r.TraceID
+	}
 	v := usagePayload{
 		Timestamp: r.RequestedAt, APIKey: r.APIKey, Provider: orUnknown(r.Provider), Model: model,
 		Alias: alias, ResponseModel: r.ResponseModel, ExecutorType: orUnknown(r.ExecutorType),
 		Endpoint: r.Endpoint, AuthType: orUnknown(r.AuthType), AuthIndex: r.AuthIndex,
 		Identity:  r.Identity,
-		RequestID: r.RequestLogID, ExecutionID: r.RequestID, TraceID: r.TraceID,
+		RequestID: requestLogID, ExecutionID: r.RequestID, TraceID: r.TraceID,
 		SessionID: sessionID, ParentSessionID: parentSessionID,
 		NodeKind: r.NodeKind, IsFork: r.IsFork, IsCompaction: r.IsCompaction,
 		ReasoningEffort: r.ReasoningEffort, ServiceTier: r.ServiceTier,

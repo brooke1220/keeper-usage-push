@@ -83,8 +83,30 @@ func TestAvailableRequestMetadataAndIdentityReachOutbox(t *testing.T) {
 	if got.ReasoningEffort != "xhigh" || got.ServiceTier != "auto" || got.EffectiveServiceTier != "priority" || got.ResponseServiceTier != "default" || !got.Stream || got.Identity == nil || *got.Identity != *r.Identity {
 		t.Fatal("available request or identity metadata was lost")
 	}
-	if got.Endpoint != "" || got.RequestID != "" || got.ExecutionID != r.RequestID || strings.Contains(string(raw), "sk-upstream-secret") {
+	if got.Endpoint != "" || got.RequestID != r.TraceID || got.ExecutionID != r.RequestID || strings.Contains(string(raw), "sk-upstream-secret") {
 		t.Fatal("unavailable metadata was invented or an upstream secret was copied")
+	}
+}
+
+func TestRequestLogIDFallsBackToTraceID(t *testing.T) {
+	for _, tc := range []struct{ logID, traceID, want string }{
+		{"", "a1b2c3d4", "a1b2c3d4"},
+		{"log-1", "a1b2c3d4", "log-1"},
+		{"", "", ""},
+	} {
+		r := record(t)
+		r.RequestLogID, r.TraceID = tc.logID, tc.traceID
+		raw, err := payload(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got usagePayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.RequestID != tc.want || got.TraceID != tc.traceID {
+			t.Fatalf("log %q trace %q: got request_id %q trace_id %q, want %q", tc.logID, tc.traceID, got.RequestID, got.TraceID, tc.want)
+		}
 	}
 }
 

@@ -53,7 +53,8 @@ Windows x64 请下载 `keeper-usage-push_<version>_windows_amd64.zip`。DLL 是�
 |---|---|---|
 | Token 明细（缓存、推理等分类） | 不发送 | 使用 CPA SDK 的 `EnsureTokenBreakdownForProvider`，根据平铺的 token 计数推导；宿主在执行器未提供明细时也使用该方法。部分上游响应只能归为 `unclassified`，试运行期间应与拉取通道核对费用 |
 | 成功状态码 | `0` | 设为 `200`；没有状态码的失败记录设为 `500`，与 CPA 用量队列的处理一致 |
-| `endpoint`、`request_id`（请求日志）、`node_kind`、`is_fork`、`is_compaction` | 不发送 | 保持为空，按 `endpoint` 匹配的计价规则或筛选条件不会命中 |
+| `request_id`（请求日志） | 不发送；`TraceID` 会回落为入站请求 ID | 取 `TraceID`，与 CPA 用量队列上报的 `request_id` 相同；宿主提供请求日志 ID 时优先使用。推送事件的请求日志在上报方 CPA 上，Keeper 不会为其打开请求日志 |
+| `endpoint`、`node_kind`、`is_fork`、`is_compaction`、客户端 IP、`X-Forwarded-For`、`User-Agent` | 不发送；插件收到的记录不含请求上下文 | 保持为空，Keeper 不显示请求类型和入口路径，按 `endpoint` 匹配的计价规则或筛选条件不会命中 |
 | `service_tier`、`reasoning_effort`、`stream` | 仅发送执行器记录的值 | 原样发送。CPA 用量队列还会从请求上下文补充这些字段，因此拉取通道中存在的值，在插件上报中可能为空 |
 | 会话 ID | 客户端原始值 | 使用 CPA SDK 转换为规范 UUID，与 CPA 用量队列的处理一致 |
 | 仅能通过 HTTP 响应状态识别的失败 | 记录为成功 | 插件无法恢复真实失败状态 |
@@ -181,4 +182,4 @@ KEEPER_PUSH_SIMULATION_ENDPOINT=http://127.0.0.1:4907/keeper/api/v1/ingest/usage
 
 插件通过 CPA 的只读 `host.auth.get_runtime` 接口按 `AuthIndex` 查询凭据，仅上传 `identity.display_name` 和 `identity.provider_type`。名称依次取凭据标签（标签只是 provider 类型时跳过）、OAuth 邮箱、凭据文件名，因此 OAuth 凭据的显示名称通常就是账户邮箱，与 CPA 上报的 `Account` 相同。不转发整个查询结果、旧版 `Source`、上游密钥或凭据 JSON。文件和运行时 API Key 凭据正常查询名称；`config.yaml` 中的 API Key 凭据在 CPA 的运行时查询无法解析时不带名称，不再仅凭认证类型判断凭据来源。成功查询缓存五分钟，失败缓存三十秒；查询失败不影响用量保存和上传，刷新失败时保留上次缓存的名称。
 
-先升级 Keeper 才能记录凭据名称。旧接收端不认识可选的 `identity` 字段，会返回 422；插件随即去掉该字段重发这些事件并记录一条警告，用量照常送达，只是没有名称。升级 Keeper 之前，这类上传每次会多发一个请求。排队中的记录保持原始字节和投递编号。Keeper 按 CPA 来源与凭据编号关联新旧事件名称，推送来源不再被当作本机已删除凭据。推理强度、请求／实际发出／响应速度档位和流式标记继续按 CPA 给出的值传递；官方 v8 usage 回调缺少的入口路径和请求日志编号继续留空。
+先升级 Keeper 才能记录凭据名称。旧接收端不认识可选的 `identity` 字段，会返回 422；插件随即去掉该字段重发这些事件并记录一条警告，用量照常送达，只是没有名称。升级 Keeper 之前，这类上传每次会多发一个请求。排队中的记录保持原始字节和投递编号。Keeper 按 CPA 来源与凭据编号关联新旧事件名称，推送来源不再被当作本机已删除凭据。推理强度、请求／实际发出／响应速度档位和流式标记继续按 CPA 给出的值传递；官方 v8 usage 回调缺少的入口路径继续留空，请求日志编号取自 `TraceID`。
